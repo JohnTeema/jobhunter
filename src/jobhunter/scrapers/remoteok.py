@@ -1,55 +1,90 @@
-"""RemoteOK.com scraper."""
+"""
+RemoteOK.com scraper — uses public RSS feed (avoids JS-rendered HTML).
+
+Fetch: https://remoteok.com/remote-jobs.rss (returns full XML with all jobs).
+Parse: standard xml.etree.ElementTree, map <item> → JobListing.
+"""
+
 from __future__ import annotations
-import re, httpx, tenacity
-from bs4 import BeautifulSoup
+import re
+import xml.etree.ElementTree as ET
+from typing import List
+import httpx
+
 from jobhunter.scrapers.base import BaseScraper
 from jobhunter.models import JobListing
 
-BASE = "https://remoteok.com"
-UA = {"User-Agent": "Mozilla/5.0 (compatible; jobhunter/0.1)"}
+_RSS_URL = "https://remoteok.com/remote-jobs.rss"
+_UA      = {"User-Agent": "Mozilla/5.0 (compatible; jobhunter/0.1)"}
+
 
 class RemoteOKScraper(BaseScraper):
-    source_name = "remoteok"
+    SOURCE = "remoteok"
 
-    @tenacity.retry(wait=tenacity.wait_exponential(multiplier=1,min=2,max=8),stop=tenacity.stop_after_attempt(3),reraise=True)
-    def _get(self, url: str) -> str:
-        with httpx.Client(timeout=15, headers=UA) as c:
-            r = c.get(url, follow_redirects=True); r.raise_for_status()
-            return r.text
+    def fetch(self, pages: int = 1) -> List[JobListing]:
+        try:
+            with httpx.Client(timeout=20, headers=_UA, follow_redirects=True) as c:
+                resp = c.get(_RSS_URL)
+                resp.raise_for_status()
+                xml_text = resp.text
+        except Exception as exc:
+            self.log(f"RSS fetch failed: {exc}")
+            return []
 
-    def fetch(self, pages: int = 1) -> list[JobListing]:
-        jobs: list[JobListing] = []
-        for p in range(1, pages + 1):
-            try:
-                html = self._get(f"{BASE}/?page={p}")
-            except Exception as exc:
-                print(f"[remoteok] page {p}: {exc}")
-                continue
-            soup = BeautifulSoup(html, "lxml")
-            rows = soup.find_all("tr", id=re.compile(r"^job-\d+$"))
-            for row in rows:
-                a = row.find("a", href=re.compile(r"/remote-jobs/"))
-                if not a: continue
-                h  = row.find("h2") or row.find("h3")
-                raw = (h or a).get_text(separator=" ", strip=True)
-                comp_el = row.find("a", href=re.compile(r"/companies/"))
-                company = comp_el.get_text(strip=True) if comp_el else (raw.split(" at ")[-1].strip() if " at " in raw else "")
-                loc_el  = row.find("td", class_=re.compile(r"location", re.I))
-                location = loc_el.get_text(strip=True) if loc_el else ""
-                sal_el  = row.find("td", class_=re.compile(r"salary", re.I))
-                salary  = sal_el.get_text(strip=True) if sal_el else ""
-                tag_els = row.find_all("td", class_=re.compile(r"tags", re.I))
-                tags    = [t.get_text(strip=True) for t in tag_els]
-                href    = a.get("href", "")
-                desc_el = row.find("div", class_=re.compile(r"description|markdown", re.I))
-                desc    = desc_el.get_text(separator=" ", strip=True) if desc_el else ""
-                if raw:
-                    jobs.append(JobListing(
-                        source="remoteok",
-                        source_url=BASE + href if href.startswith("/") else href,
-                        title=raw, company=company,
-                        location=location, salary_raw=salary,
-                        description=desc[:2000], tags=tags,
-                        is_remote="remote" in location.lower() or "anywhere" in location.lower(),
-                    ))
+        return self._parse(xml_text)
+
+    def _parse(self, xml_text: str) -> List[JobListing]:
+        jobs: List[JobListing] = []
+        try:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError as exc:
+            self.log(f"XML parse error: {exc}")
+            return []
+
+        channel = root.find("channel")
+        if channel is None:
+            self.log("no <channel> in RSS")
+            return []
+
+        for item in channel.findall("item"):
+            title = (item.findtext("title") or "").strip()
+
+            # description often contains company + salary
+            desc = item.findtext("description") or ""
+
+            # Try to extract company from <author> or <dc:creator>
+            author_el = item.find("{http://purl.org/dc/elements/1.1/}creator")
+            company = (author_el.text if author_el is not None else "") or ""
+
+            # Link / URL
+            link_el = item.find("link")
+            source_url = (link_el.text if link_el is not None else "").strip()
+
+            # PubDate
+            posted = item.findtext("pubDate") or None
+
+            # Salary from description if present
+            salary_raw = ""
+            salary_m = re.search(r'\$[\d,]+(?:\s*[-–]\s*\$?[\d,]+)?', desc)
+            if salary_m:
+                salary_raw = salary_m.group()
+
+            # Tags from <category> elements
+            tags = [c.text.strip() for c in item.findall("category") if c.text]
+
+            dedup = f"{title}||{company}||{source_url}"
+            jobs.append(JobListing(
+                source=self.SOURCE,
+                source_url=source_url,
+                title=title,
+                company=company,
+                location="Remote",
+                salary_raw=salary_raw,
+                description=desc[:2000],
+                posted=posted,
+                tags=tags,
+                is_remote=True,
+            ))
+
+        self.log(f"RSS parsed {len(jobs)} items")
         return jobs

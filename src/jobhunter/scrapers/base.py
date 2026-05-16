@@ -10,6 +10,9 @@ class BaseScraper(abc.ABC):
         self.roles = roles or []
         self.locations = locations or []
 
+    def log(self, msg: str) -> None:
+        print(f"  [{self.source_name}] {msg}")
+
     @abc.abstractmethod
     def fetch(self, pages: int = 1) -> list[JobListing]:
         raise NotImplementedError

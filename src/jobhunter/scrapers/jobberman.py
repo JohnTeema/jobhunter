@@ -31,7 +31,7 @@ class JobbermanScraper(BaseScraper):
                     with httpx.Client(timeout=20, headers=UA, follow_redirects=True) as c:
                         html = c.get(url); html.raise_for_status()
                 except Exception as exc:
-                    self.log(f"jobberman role={role} page={p}: {exc}")
+                    print("  [jobberman] ", f"jobberman role={role} page={p}: {exc}")
                     continue
 
                 soup = bs4.BeautifulSoup(html.text, "html.parser")

@@ -25,12 +25,12 @@ bio: >
   Nigerian-based, fully remote or Nigeria/US timezone.
   Agile delivery, API design, SQL, A/B testing, stakeholder comms.
 sources:
-  remoteok:    { enabled: true, pages: 1 }
-  remotive:    { enabled: true, pages: 1 }
-  indeed:      { enabled: true, pages: 1 }
-  jobberman:   { enabled: true, pages: 1 }
-  linkedin:    { enabled: true, pages: 1 }
-  wellfound:   { enabled: true, pages: 1 }
-  wwr:         { enabled: true, pages: 1 }
-  duckduckgo:  { enabled: true, pages: 1 }
-  naukri:      { enabled: false, pages: 1 }
+  remoteok:    { enabled: true,  pages: 1 }   # RSS feed — reliable
+  remotive:    { enabled: true,  pages: 1 }   # public API — reliable
+  duckduckgo:  { enabled: true,  pages: 1 }   # site: queries — reliable
+  indeed:      { enabled: false, pages: 1 }   # 403 — needs Playwright fallback
+  jobberman:   { enabled: false, pages: 1 }   # Cloudflare — needs Playwright fallback
+  linkedin:    { enabled: false, pages: 1 }   # 403 — needs Playwright fallback
+  wellfound:   { enabled: false, pages: 1 }   # 403 — needs Playwright fallback
+  wwr:         { enabled: false, pages: 1 }   # 403 — needs Playwright fallback
+  naukri:      { enabled: false, pages: 1 }   # 0 results — selector fix needed
