@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jobhunter — daily shortlist</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .score-bar { transition: width 0.6s ease; }
+  .tag { background: #e0f2fe; color: #0369a1; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+<!-- Embedded data from jobhunter production run → works offline -->
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+    </div>
+    <h1 class="text-xl font-bold text-slate-900">jobhunter</h1>
+    <span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full mono" id="generatedAt"></span>
+  </div>
+  <div class="flex items-center gap-3">
+    <label class="text-sm text-slate-500">Load:</label>
+    <input type="file" id="fileInput" accept=".json"
+      class="block text-sm text-slate-600 file:mr-2 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+    <button id="refreshBtn"
+      class="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-full hover:bg-blue-700 transition font-medium">
+      ↻ Refresh
+    </button>
+  </div>
+</header>
+
+<!-- Stats bar -->
+<section id="stats" class="bg-white border-b border-slate-200 px-6 py-4 flex gap-8 text-sm opacity-0 transition-opacity">
+  <span><b id="totalJobs">0</b> <span class="text-slate-400">roles</span></span>
+  <span class="text-emerald-600"><b id="strongCount">0</b> <span class="text-slate-400">strong (7+)</span></span>
+  <span class="text-amber-500"><b id="reachCount">0</b> <span class="text-slate-400">reach (5-6)</span></span>
+  <span class="text-slate-400">threshold: <b id="threshold">5/10</b></span>
+</section>
+
+<!-- Filters -->
+<section class="bg-white border-b border-slate-200 px-6 py-3 flex gap-4 items-center flex-wrap">
+  <input type="text" id="searchInput" placeholder="Search title, company, tags…"
+    class="flex-1 min-w-48 text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-md" />
+  <select id="scoreFilter" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none">
+    <option value="all">All scores</option>
+    <option value="strong">Strong (7+)</option>
+    <option value="apply">Apply (5+)</option>
+  </select>
+  <label class="flex items-center gap-1 text-sm text-slate-600">
+    <input type="checkbox" id="hideApplied" class="rounded"> Hide applied
+  </label>
+</section>
+
+<!-- Job list -->
+<main class="px-6 py-4 max-w-5xl mx-auto" id="jobList">
+  <div id="emptyState" class="text-center py-16 text-slate-400 hidden">
+    <p class="text-lg">No roles match yet.</p>
+    <p class="text-sm mt-1">Try lowering the score threshold or broadening the role filters.</p>
+  </div>
+  <div id="cardList" class="space-y-3"></div>
+</main>
+
+<!-- Detail modal -->
+<p class="text-xs text-slate-400 mt-2 mb-1 hidden" id="embedNote">Data embedded — click Refresh to re-run jobhunter first</p>
+  <dialog id="modal" class="p-0 bg-white rounded-2xl shadow-2xl max-w-2xl w-[90vw] max-h-[85vh] overflow-hidden">
+  <form method="dialog" class="flex flex-col h-full">
+    <header class="px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-bold text-slate-900" id="modalTitle"></h2>
+        <p class="text-slate-500 text-sm mt-0.5" id="modalCompany"></p>
+      </div>
+      <button class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </header>
+    <div class="px-6 py-4 space-y-4 overflow-y-auto flex-1" id="modalBody"></div>
+    <footer class="px-6 py-3 border-t border-slate-200 flex justify-end gap-3 bg-slate-50">
+      <a id="modalSource" href="#" target="_blank"
+        class="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium">
+        Open source ↗
+      </a>
+      <button class="text-sm bg-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300">
+        Close
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<script>
+// ── helpers ──────────────────────────────────────────────────────────────────
+function scoreColor(s) {
+  if (s >= 8) return { bar: 'bg-emerald-500', text: 'text-emerald-700', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+  if (s >= 6) return { bar: 'bg-blue-500',    text: 'text-blue-700',    badge: 'bg-blue-50    text-blue-700    border-blue-200' };
+  return           { bar: 'bg-amber-400',     text: 'text-amber-700',   badge: 'bg-amber-50  text-amber-700  border-amber-200' };
+}
+const TAG_COLORS = ['#dbeafe','#fce7f3','#f0fdf4','#fef9c3','#ede9fe','#fff7ed','#ccfbf1','#fee2e2'];
+
+let data = {};
+
+// ── render ────────────────────────────────────────────────────────────────────
+function render(list) {
+  const container = document.getElementById('cardList');
+  container.innerHTML = '';
+  if (!list.length) {
+    document.getElementById('emptyState').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('emptyState').classList.add('hidden');
+
+  for (const j of list) {
+    const s = scoreColor(j.score);
+    const tags = (j.tags || []).map((t, i) =>
+      `<span class="tag text-xs px-2 py-0.5 rounded-full mr-1 mb-1" style="background:${TAG_COLORS[i % TAG_COLORS.length]};color:#374151">${escHtml(t)}</span>`
+    ).join('');
+    const notePreview = (j.personal_note || '').substring(0, 160) + ('…' || '');
+
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow cursor-pointer';
+    card.innerHTML = `
+      <div class="flex gap-4 items-start">
+        <!-- score -->
+        <div class="flex-shrink-0 w-12 h-12 flex flex-col items-center justify-center rounded-xl ${s.badge} border">
+          <span class="text-xl font-bold ${s.text}">${j.score}</span>
+          <span class="text-[9px] uppercase tracking-wider text-slate-400 mt-0.5">fit</span>
+        </div>
+        <!-- content -->
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-slate-900 leading-snug">${escHtml(j.title)}</h3>
+              <p class="text-sm text-slate-500 mt-0.5">${escHtml(j.company)} · ${escHtml(j.location || 'Remote')}</p>
+            </div>
+            <span class="mono text-xs text-slate-400 flex-shrink-0">${escHtml(j.source || '')}</span>
+          </div>
+          <div class="mt-2 flex gap-2 flex-wrap text-xs">
+            ${j.salary_raw ? `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 mono">${escHtml(j.salary_raw)}</span>` : ''}
+            ${tags}
+          </div>
+          <p class="mt-2 text-sm text-slate-500 leading-relaxed">${notePreview}</p>
+           <!-- score bar -->
+          <div class="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full ${s.bar} score-bar rounded-full" style="width:${j.score * 10}%"></div>
+          </div>
+        </div>
+        <!-- apply -->
+        <div class="flex-shrink-0">
+          <a href="${escHtml(j.source_url)}" target="_blank"
+            class="inline-flex items-center gap-1 text-sm bg-slate-900 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700 font-medium">
+            Apply <span class="text-xs">↗</span>
+          </a>
+        </div>
+      </div>`;
+    card.addEventListener('click', (e) => { if (e.target.tagName !== 'A') openModal(j); });
+    container.appendChild(card);
+  }
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function getJobs() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const sf = document.getElementById('scoreFilter').value;
+  const hideApplied = document.getElementById('hideApplied').checked;
+  return (data.jobs || []).filter(j => {
+    const hay = `${j.title} ${j.company} ${j.location} ${(j.tags||[]).join(' ')}`.toLowerCase();
+    if (search && !hay.includes(search)) return false;
+    if (sf === 'strong' && j.score < 7) return false;
+    if (sf === 'apply'   && j.score < 5) return false;
+    return true;
+  });
+}
+
+function refresh() {
+  const search = document.getElementById('searchInput').value;
+  render(getJobs());
+  document.getElementById('stats').style.opacity = '1';
+  const jobs = data.jobs || [];
+  document.getElementById('totalJobs').textContent = jobs.length;
+  document.getElementById('strongCount').textContent = jobs.filter(j => j.score >= 7).length;
+  document.getElementById('reachCount').textContent  = jobs.filter(j => j.score < 7 && j.score >= 5).length;
+  document.getElementById('threshold').textContent   = `${data.criteria ? data.criteria.split('score>=' )[1]?.split(' ')[0] || '5' : '5'}/10`;
+  document.getElementById('generatedAt').textContent = data.generated_at || '';
+}
+
+document.getElementById('searchInput').addEventListener('input', refresh);
+document.getElementById('scoreFilter').addEventListener('change', refresh);
+document.getElementById('hideApplied').addEventListener('change', refresh);
+
+// ── file loading ──────────────────────────────────────────────────────────────
+document.getElementById('fileInput').addEventListener('change', function (e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => { data = JSON.parse(ev.target.result); refresh(); };
+  r.readAsText(f);
+});
+
+document.getElementById('refreshBtn').addEventListener('click', async () => {
+  try {
+    const r = await fetch('./daily.json');
+    data = await r.json();
+    refresh();
+  } catch(err) {
+    alert('Could not load daily.json — click "Load" and pick the file from your output/ folder.');
+  }
+});
+
+// ── modal ─────────────────────────────────────────────────────────────────────
+function openModal(j) {
+  document.getElementById('modalTitle').textContent = j.title;
+  document.getElementById('modalCompany').textContent = `${j.company} · ${j.location || 'Remote'}`;
+  document.getElementById('modalSource').href = j.source_url;
+  const s = scoreColor(j.score);
+  document.getElementById('modalBody').innerHTML = `
+    <div class="flex items-center gap-3">
+      <div class="w-14 h-14 flex flex-col items-center justify-center rounded-xl ${s.badge} border">
+        <span class="text-2xl font-bold ${s.text}">${j.score}</span>
+        <span class="text-[10px] uppercase tracking-wider text-slate-400 mt-0.5">fit</span>
+      </div>
+      <div class="flex-1">
+        <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full ${s.bar} rounded-full" style="width:${j.score*10}%"></div></div>
+        <p class="mt-1 text-sm font-medium">${j.score >= 8 ? '✅ Strong match' : j.score >= 6 ? '👍 Apply' : j.score >= 5 ? '⚡ Reach' : '⚠️ Skip'}</p>
+      </div>
+    </div>
+    ${j.salary_raw ? `<p class="mono text-sm text-slate-700">${escHtml(j.salary_raw)}</p>` : ''}
+    <div class="mt-3 space-y-3">
+      <div>
+        <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Why you fit</h4>
+        <p class="text-sm text-slate-700 leading-relaxed">${escHtml(j.personal_note)}</p>
+      </div>
+      <div>
+        <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Highlights</h4>
+        <ul>${(j.reasons || []).map(r => `<li class="text-sm text-slate-700 before:content-['→'] before:mr-2 before:text-slate-300">${escHtml(r)}</li>`).join('')}</ul>
+      </div>
+      <div>
+        <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Tags</h4>
+        <div>${(j.tags || []).map(t => `<span class="tag text-xs px-2 py-0.5 rounded-full mr-1" style="background:${TAG_COLORS[Math.abs(hash(t)) % TAG_COLORS.length]};color:#374151">${escHtml(t)}</span>`).join('')}</div>
+      </div>
+    </div>`;
+  document.getElementById('modal').showModal();
+}
+document.querySelector('#modal button[type="button"]').addEventListener('click', () =>
+  document.getElementById('modal').close() );
+document.querySelector('#modal [method="dialog"] button:last-child').addEventListener('click', () =>
+  
+  document.getElementById('modal').close() );
+
+</script>
+
+<!-- Embed daily shortlist as JSON: eliminates fetch() so it works via file:// -->
+<script id="daily-data" type="application/json">
+{
+  "generated_at": "2026-05-16T04:58",
+  "criteria": "roles=['product-manager', 'backend-engineer'] locations=['remote', 'nigeria', 'united-states'] salary>=$150,000",
+  "jobs": [
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2090002",
+      "title": "Senior DevOps Engineer",
+      "company": "Lemon.io",
+      "location": "Americas, Europe, Asia, Oceania",
+      "salary_raw": "",
+      "description": "<p>Are you a talented Senior DevOps looking for a remote job that lets you show your skills and get decent compensation? Look no further than <a href=\"https://lemon.io/for-developers/?utm_source=remotive&amp;utm_medium=job_ad&amp;utm_campaign=supply_en_devops_apr_2026_job_ad\" rel=\"nofollow\" target=\"_self\">Lemon.io</a> — the marketplace that connects you with hand-picked startups in the US and Europe.</p>\n<p><strong> </strong></p>\n<p><strong>What we offer:</strong></p>\n<ul style=\"\">\n<li style=\"\">The rate depends on your seniority level, skills and experience. We've already paid out over $11M to our engineers.</li>\n<li style=\"\">No more hunting for clients or negotiating rates — let us handle the business side of things so you can focus on what you do best.</li>\n<li style=\"\">We'll manually find the best project for you according to your skills and preferences.</li>\n<li style=\"\">Choose a schedule that works best for you. It’s possible to communicate async or minimally overlap within team working hours.</li>\n<li style=\"\">We respect your seniority so you can expect no micromanagement or screen trackers.</li>\n<li style=\"\">Communicate directly with the clients. Most of them have technical backgrounds. Sounds good, yeah?</li>\n<li style=\"\">We will support you from the time you submit the application throughout all cooperation stages.</li>\n<li style=\"\">Most of our projects involve working in a fast-paced startup environment. We hope you like it as much as we do.</li>\n<li style=\"\">Through our community, we will connect you with the best developers from more than 71 countries.</li>\n</ul>\n<p> </p>\n<p>We have several openings for Senior DevOps Engineers, with two types of requirements.</p>\n<p><strong> </strong></p>\n<p><strong>Requirements – DevOps with Azure DevOps:</strong></p>\n<ul style=\"\">\n<li style=\"\">4+ years of experience as a DevOps Engineer</li>\n<li style=\"\">At least 3 years of experience with Azure DevOps</li>\n<li style=\"\">Experience in at least 2 commercial projects usin",
+      "posted": null,
+      "tags": [
+        ".Net",
+        "android",
+        "AWS",
+        "azure",
+        "C",
+        "C#",
+        "C++",
+        "data science",
+        "golang",
+        "ios",
+        "java",
+        "javascript",
+        "kubernetes",
+        "node.js",
+        "php",
+        "python",
+        "react",
+        "ruby/rails",
+        "shopify",
+        "sql",
+        "video",
+        "blockchain",
+        "AI/ML",
+        "automation",
+        "react native",
+        "rust",
+        "unity",
+        "spring",
+        "data analysis",
+        "laravel",
+        "solidity",
+        "flask",
+        "Typescript ",
+        "terraform",
+        "angular ",
+        "GCP",
+        "data engineering",
+        "Symfony",
+        "startup",
+        "marketplace",
+        "next.js"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "python + remote + salary + ml + data science",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your python + remote + salary + ml + data science background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-workos-1131100",
+      "title": "Remote Product Manager ( ~$213k, San Francisco) at WorkOS",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "WorkOS is hiring a Remote Product Manager (💰~$213k - $250k, San Francisco). About WorkOS 🚀WorkOS builds modern developer tools and APIs that make it easy for companies to become Enterprise Ready. Our platform powers authentication, identity, authorization, and other critical infrastructure tha...",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-data-management-amp-platform-hhaexchange-1131017",
+      "title": "Remote Product Manager Data Management & Platform",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Remote Product Manager Data Management & Platform HHAeXchange is the leading technology platform for home and community-based care. Founded in 2008, HHAeXchange was born out of an idea to create a fully comprehensive end-to-end homecare solution to help people who are aging or have disabilities thrive in their homes and communities.",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-associate-product-manager-automox-1131256",
+      "title": "Remote Associate Product Manager at Automox",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Automox is hiring a Remote Associate Product Manager . Are you ready to own something big? Automox is turning IT admins into IT heroes by replacing traditional tools with our award winning cloud-native endpoint management platform. Our product works autonomously and so do our teams. We value a '...",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-lively-1131146",
+      "title": "Remote Product Manager at Lively",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Lively is hiring a Remote Product Manager . About Lively Lively set out to raise the bar on benefit solutions, because we believe no one should have to sacrifice personal wellness for financial wellness. While traditional benefits focus more on transactions and less on the humans using them, Lively h...",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-conduit-1129162",
+      "title": "Remote Product Manager at Conduit",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Conduit is hiring a Remote Product Manager . Conduit At Conduit, we're building the crypto-native cloud platform that will scale Ethereum.Crypto builders have been held back by a lack of onchain compute — without the ability to process a high volume of transactions quickly and cheaply, onchain...",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-enablecomp-1128799",
+      "title": "Remote Product Manager at EnableComp",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Remote Product Manager EnableComp provides Specialty Revenue Cycle Management solutions for healthcare organizations, leveraging over 24 years of industry-leading expertise and its unified E360 RCM™ intelligent automation platform to improve financial sustainability for hospitals, health systems, and ambulatory surgery centers (ASCs) nationwide.",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://www.remoteok.com/remote-jobs/67425-remote-product-manager-fetlife",
+      "title": "Remote Product Manager ( ~$90k) at FetLife",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "FetLife is hiring a Remote Product Manager (💰~$90k). At FetLife we are looking for an open-minded kink-friendly Product Manager to join the Team. **We're looking for someone who is** * Goal oriented, data-driven, and follows a scientific approach to problem-solving * Passionate about product ,...",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-staff-product-manager-enterprise-livekit-1131531",
+      "title": "Remote Staff Product Manager Enterprise ( ~$245k) at LiveKit",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "LiveKit is hiring a Remote Staff Product Manager Enterprise About LiveKitLiveKit is the developer platform for building and operating real-time voice AI agents. We started as the leading open-source WebRTC platform and have grown into a comprehensive stack: SDKs and developer tooling, agent hosting, inference, telephony, and observability.",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-us-blue-bottle-coffee-1128649",
+      "title": "Remote Product Manager US at Blue Bottle Coffee",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Remote Product Manager US Blue Bottle Coffee is a passionate and growing team of hundreds around the world, united by the simple purpose of getting great coffee (and food) to everyone who asks for it. We roast on three coasts, make delicious drinks, clean up after ourselves, bake cookies, get change at the bank, and say please and thank you.",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "duckduckgo",
+      "source_url": "https://remoteok.com/remote-jobs/remote-product-manager-of-integrated-care-sleep-doctor-1130669",
+      "title": "Remote Product Manager of Integrated Care at Sleep Doctor",
+      "company": "",
+      "location": "",
+      "salary_raw": "",
+      "description": "Sleep Doctor is hiring a Remote Product Manager of Integrated Care. About Us At Sleep Doctor, we're helping millions get a full night's rest. As the most trusted name in sleep health, we make better sleep possible with proven support, clear answers, and hands-on care that fits real life. A...",
+      "posted": null,
+      "tags": [
+        "duckduckgo"
+      ],
+      "is_remote": true,
+      "score": 9,
+      "reasons": [
+        "product manager + remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your product manager + remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2090881",
+      "title": "Business Transformation Lead",
+      "company": "Expion Health",
+      "location": "USA",
+      "salary_raw": "$175k - $225k",
+      "description": "<p><strong>Title</strong>: Business Transformation Lead</p>\n<p><strong>Location</strong>: Fully Remote</p>\n<p><strong>Reports To</strong>: President, Service &amp; Growth</p>\n<p> </p>\n<p>Expion Health is building the future of pharmacy economics. As architects of prescription economics, we design how pharmacy value is created, aligning cost, clinical decisions, and performance into one accountable system that moves beyond rebates. We help organizations stay ahead of pharmacy market change with clear insight, bold thinking, and strategies built for what's next-leading the next era of prescription economics.</p>\n<p> </p>\n<p><strong>The Role</strong></p>\n<p>As our <strong>Business Transformation Lead</strong>, you'll be the architect and driver of how we embed AI into the way every team in our company works. This isn't a slide-deck strategy role. You'll be on the ground with department leaders, identifying real workflow opportunities, turning them into real solutions, and building the internal capability that makes the transformation stick.</p>\n<p> </p>\n<p>You'll lead our AI Champions program, partner directly with executive leadership, and own the roadmap that takes Expion Health from an organization that uses AI tools to one that runs on AI intelligence. If you've spent time figuring out how to make AI work in the real world - not just in theory - and you want to do it at a company that's fast, innovative, and genuinely committed to this, this role was built for you.</p>\n<p> </p>\n<p><strong>What You'll Own</strong></p>\n<p> </p>\n<ul style=\"\">\n<li style=\"\"><strong>Drive Transformation (65%)</strong></li>\n<ul style=\"\">\n<li style=\"\">Own the AI transformation roadmap end-to-end - from strategy to execution - and keep it moving in a fast-paced environment</li>\n<li style=\"\">Run discovery sessions with department leaders across Sales, Client Management, Clinical, Finance, Operations, IT, and Trade to surface high-impact AI opportunities</li>\n<li style=\"\">Design and lead our ",
+      "posted": null,
+      "tags": [
+        "api",
+        "AI/ML",
+        "automation",
+        "healthcare",
+        "spark",
+        "startup",
+        "infrastructure",
+        "insurance"
+      ],
+      "is_remote": true,
+      "score": 7,
+      "reasons": [
+        "remote + salary + ml",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your remote + salary + ml background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/1680495",
+      "title": "Office Assistant",
+      "company": "Coalition Technologies ",
+      "location": "Worldwide",
+      "salary_raw": "$31,2k- $52k",
+      "description": "<p class=\"h3\">WHY YOU SHOULD APPLY:</p>\n<p> </p>\n<p>Coalition Technologies is devoted to delivering clients the highest quality work while providing our team a fun, thriving, and innovative environment. Along with the opportunity for tremendous career growth and rapid advancement, CT offers:</p>\n<ul style=\"\">\n<li style=\"\">The most competitive profit-sharing bonus plan in the industry, paying up to 50% of company profits to full-time employees each month!</li>\n<li style=\"\">A highly competitive Paid Time Off plan, promoting quality work-life balance.</li>\n<li style=\"\">Subsidized gym memberships to help team members feel their best.</li>\n<li style=\"\">Medical, dental, vision, and life insurance packages for all US-based team members.</li>\n<li style=\"\">International Health Insurance Reimbursement Program for all international team members, a benefit unique to Coalition.</li>\n<li style=\"\">Device upgrade and learning reimbursement programs.</li>\n<li style=\"\">Motivating career development plans with clearly defined goals and rewards.</li>\n<li style=\"\">Additional job-specific incentives and bonuses.<br><br></li>\n</ul>\n<p>Plus, 100% of our team works remotely with the support of time tracking software. Our company culture specializes in supporting remote team members, and we’ve been doing so for more than a decade. CT welcomes your application, wherever in the world it's coming from!</p>\n<p class=\"h3\"> </p>\n<p class=\"h3\">YOU SHOULD HAVE:</p>\n<p> </p>\n<ul style=\"\">\n<li style=\"\">Willingness to learn, grow, and collaborate with the team and company as a whole.</li><li style=\"\">Excellent verbal and written communication skills.</li><li style=\"\">A high level of discretion, ethics, and trustworthiness.</li><li style=\"\">Intermediate spreadsheet skills (preferred)</li><li style=\"\">Innovative thinking and a willingness to challenge existing methods where improvement is possible.</li><li style=\"\">Experience in bookkeeping / financial record keeping (preferred).</li><li style=\"\">Experie",
+      "posted": null,
+      "tags": [
+        "CSS",
+        "excel",
+        "frontend",
+        "git",
+        "html",
+        "illustrator",
+        "magento",
+        "photoshop",
+        "php",
+        "shopify",
+        "wordpress",
+        "MySQL",
+        "startup",
+        "responsive",
+        "themes",
+        "bootstrap",
+        "insurance",
+        "jQuery",
+        "Ajax"
+      ],
+      "is_remote": true,
+      "score": 7,
+      "reasons": [
+        "remote + salary + ml",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your remote + salary + ml background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/1956455",
+      "title": "iOS Developer",
+      "company": "nooro",
+      "location": "USA",
+      "salary_raw": "$60k-$130k (depending on experience)",
+      "description": "<p style=\"box-sizing: inherit; margin: var(--artdeco-reset-base-margin-zero); padding: var(--artdeco-reset-base-padding-zero); border: var(--artdeco-reset-base-border-zero); vertical-align: var(--artdeco-reset-base-vertical-align-baseline); line-height: 1.5; color: rgba(0, 0, 0, 0.9);\"><span style=\"box-sizing: inherit; margin: var(--artdeco-reset-base-margin-zero); padding: var(--artdeco-reset-base-padding-zero); border: var(--artdeco-reset-base-border-zero); vertical-align: var(--artdeco-reset-base-vertical-align-baseline); background: var(--artdeco-reset-base-background-transparent); outline: var(--artdeco-reset-base-outline-zero);\"><strong>WHO ARE WE?</strong></span></p>\n<p style=\"box-sizing: inherit; margin: var(--artdeco-reset-base-margin-zero); padding: var(--artdeco-reset-base-padding-zero); border: var(--artdeco-reset-base-border-zero); vertical-align: var(--artdeco-reset-base-vertical-align-baseline); line-height: 1.5; color: rgba(0, 0, 0, 0.9);\"> </p>\n<p style=\"box-sizing: inherit; margin: var(--artdeco-reset-base-margin-zero); padding: var(--artdeco-reset-base-padding-zero); border: var(--artdeco-reset-base-border-zero); vertical-align: var(--artdeco-reset-base-vertical-align-baseline); line-height: 1.5; color: rgba(0, 0, 0, 0.9);\">At nooro, we're revolutionizing pain management for seniors. Our platform is transforming how older adults engage with pain management at home. We're on a mission to make wellness more accessible and effective through technology.</p>\n<p style=\"box-sizing: inherit; margin: var(--artdeco-reset-base-margin-zero); padding: var(--artdeco-reset-base-padding-zero); border: var(--artdeco-reset-base-border-zero); vertical-align: var(--artdeco-reset-base-vertical-align-baseline); line-height: 1.5; color: rgba(0, 0, 0, 0.9);\"> </p>\n<p style=\"box-sizing: inherit; margin: var(--artdeco-reset-base-margin-zero); padding: var(--artdeco-reset-base-padding-zero); border: var(--artdeco-reset-base-border-zero); vertical-align: var(--artdeco-reset-",
+      "posted": null,
+      "tags": [
+        "api",
+        "backend",
+        "git",
+        "ios",
+        "security",
+        "swift",
+        "UI/UX",
+        "Figma",
+        "agile",
+        "healthcare",
+        "startup",
+        "core data",
+        "github",
+        "REST",
+        "MVVM",
+        "mobile development"
+      ],
+      "is_remote": true,
+      "score": 7,
+      "reasons": [
+        "backend + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your backend + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2089958",
+      "title": "AI Engineer",
+      "company": "Dry Ground AI",
+      "location": "Brazil, Colombia, Philippines",
+      "salary_raw": "$40- $60k",
+      "description": "<p class=\"MsoNormal\">We are seeking a versatile and highly skilled AI Engineer to join our fast-growing Full-Stack AI Solutions company. This role blends the expertise of building cutting-edge AI/ML models with the practical know-how of automation and agentic system integrations. You will design, develop, deploy, and optimize intelligent solutions that leverage the power of generative AI, automation platforms, and agent-based systems to enhance client operations, streamline workflows, and deliver measurable results.</p>\n<p class=\"MsoNormal\">This is a unique opportunity to work across a diverse range of technologies—from fine-tuning transformer models to building real-world AI-powered automation stacks. If you’re passionate about pushing the boundaries of AI while creating real value through systems thinking and practical implementation, this role is for you.</p>\n<p class=\"MsoNormal\"> </p>\n<div class=\"h3\">Key Responsibilities</div>\n<p class=\"MsoNormal\"><strong>AI/ML Development:</strong></p>\n<p> </p>\n<ul style=\"\" type=\"disc\">\n<li class=\"MsoNormal\" style=\"\">Design, build, and deploy machine learning and generative AI models for custom use cases.\n<p> </p>\n</li>\n<li class=\"MsoNormal\" style=\"\">Fine-tune and optimize large language models (e.g., GPT, BERT) using frameworks like Hugging Face Transformers.\n<p> </p>\n</li>\n<li class=\"MsoNormal\" style=\"\">Conduct ongoing research to stay ahead of advancements in AI/ML, including LLMs, generative AI, and transformer-based architectures.\n<p> </p>\n</li>\n<li class=\"MsoNormal\" style=\"\">Develop data pipelines for preprocessing, feature engineering, and model training.\n<p> </p>\n</li>\n<li class=\"MsoNormal\" style=\"\">Test, validate, and monitor model performance in real-world scenarios; iterate for reliability and accuracy.\n<p> </p>\n</li>\n<li class=\"MsoNormal\" style=\"\">Collaborate with cross-functional teams to embed AI into products, platforms, and services.\n<p> </p>\n</li>\n<li class=\"MsoNormal\" style=\"\">Mentor junior engineers and contr",
+      "posted": null,
+      "tags": [
+        "api",
+        "cloud",
+        "fullstack",
+        "python",
+        "AI/ML",
+        "automation",
+        "research",
+        "CI/CD",
+        "TensorFlow",
+        "spark",
+        "NLP",
+        "CMS",
+        "Pytorch",
+        "REST"
+      ],
+      "is_remote": true,
+      "score": 7,
+      "reasons": [
+        "python + salary + ml",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your python + salary + ml background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2088655",
+      "title": "Customer Support Representative",
+      "company": "AutoHDR",
+      "location": "USA",
+      "salary_raw": "",
+      "description": "<div class=\"h3\">Company Description</div>\n<p> </p>\n<p>AutoHDR is an AI real estate photo editing platform. We launched less than a year ago and already edit 25% of U.S. real estate listings.</p>\n<p> </p>\n<p>We’re building a category-defining product and looking for people who want to help us scale it fast. This is an early hire on a small team of A players changing the industry.</p>\n<p> </p>\n<div class=\"h3\">Role Description</div>\n<p> </p>\n<p>We’re hiring a Customer Support Rep to own inbound support and make sure the product is delivered well to users.</p>\n<p> </p>\n<p>This is not a passive support role. We want someone fast, sharp, calm under pressure, and great with people. Your job is to respond quickly, solve problems clearly, and make sure every customer gets the right outcome fast.</p>\n<p> </p>\n<p>You’ll handle inbound questions, quality issues, flagged shoots, human edit requests, and account-related problems. You’ll also be responsible for spotting when something is actually a bug, a churn risk, a sales opportunity, or an onboarding issue, and routing it correctly.</p>\n<p> </p>\n<p>We want someone who can think clearly, communicate well, and use judgment. You should be able to solve what can be solved, escalate what needs escalation, and always leave the customer feeling taken care of.</p>\n<p> </p>\n<p>You should also be constantly thinking about how support can be faster, smarter, and more scalable over time.</p>\n<p> </p>\n<div class=\"h3\">Requirements</div>\n<p> </p>\n<p>You love helping people and communicating clearly.</p>\n<p>You are fast, organized, and highly responsive.</p>\n<p>You have strong judgment and know how to solve problems without overcomplicating them.</p>\n<p>You are high-agency and take ownership instead of waiting around.</p>\n<p>You can stay calm under pressure and handle urgent issues well.</p>\n<p>You pay close attention to detail and care about quality.</p>\n<p>You are good at figuring out whether something is a support issue, a bug, a churn ris",
+      "posted": null,
+      "tags": [
+        "saas",
+        "AI/ML",
+        "editing",
+        "technical support",
+        "onboarding",
+        "responsive"
+      ],
+      "is_remote": true,
+      "score": 7,
+      "reasons": [
+        "salary + ml + saas",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your salary + ml + saas background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2090878",
+      "title": "Director of Revenue Systems and AI Automation (Offshore) ",
+      "company": "Caul Group",
+      "location": "LATAM",
+      "salary_raw": "$60k–$72k",
+      "description": "<p dir=\"ltr\" style=\"line-height: 1.38; text-align: center; margin-top: 12pt; margin-bottom: 12pt;\"><strong><span style=\"color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">This search is open exclusively to candidates based in Latin America. </span><span style=\"color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\"><br></span><span style=\"color: #000000; background-color: transparent; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Preference for Uruguay, Costa Rica, or Colombia.</span></strong></p>\n<p> </p>\n<hr>\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"color: #000000; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">BACKGROUND CONTEXT</span></p>\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Every department at Caul Group is generating AI and automation ideas faster than they can be built. This role turns those ideas into operational reality — and finds the ones nobody thought to ask about yet.</span></p>\n<p dir=\"ltr\" style=\"line-height: 1.38; margin-top: 12pt; margin-bottom: 12pt;\"><span style=\"color: #000000; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">You are not advising. You are not consulting. You own the systems layer of this business and make it faster, cleaner, and more profi",
+      "posted": null,
+      "tags": [
+        "api",
+        "AI/ML",
+        "automation",
+        "documentation",
+        "CRM",
+        "analytics",
+        "systems architecture",
+        "onboarding",
+        "infrastructure",
+        "REST"
+      ],
+      "is_remote": true,
+      "score": 6,
+      "reasons": [
+        "salary + ml",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your salary + ml background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2086540",
+      "title": "Inside Sales Contractor",
+      "company": "Credit Wellness, LLC",
+      "location": "Worldwide",
+      "salary_raw": "OTE $25k - $35k",
+      "description": "<p dir=\"ltr\" style=\"line-height: 1.38; background-color: #ffffff; margin-top: 0pt; margin-bottom: 0pt; padding: 0pt 0pt 12pt 0pt;\"><span style=\"color: #2d2d2d; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">About Us</span></p>\n<p dir=\"ltr\" style=\"line-height: 1.38; background-color: #ffffff; margin-top: 0pt; margin-bottom: 0pt; padding: 0pt 0pt 12pt 0pt;\"><span style=\"color: #2d2d2d; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">We are a financial services start up focusing on helping to improve consumer credit profiles. We are currently seeking KPI driven sales representatives looking to earn up to 45K in their first year while working remotely. We offer comprehensive training and continuous sales coaching to help you meet your financial goals.</span></p>\n<p dir=\"ltr\" style=\"line-height: 1.38; background-color: #ffffff; margin-top: 0pt; margin-bottom: 0pt; padding: 0pt 0pt 12pt 0pt;\"><span style=\"color: #2d2d2d; background-color: transparent; font-weight: 400; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">During our training period we offer a guaranteed training stipend while our trainees are acclimating to the position (*see weekly pay below). If you are a seasoned sales professional looking for the autonomy of a remote position combined with great compensation, we want to hear from you!</span></p>\n<div class=\"h2\" dir=\"ltr\" style=\"line-height: 1.38; background-color: #ffffff; margin-top: 0pt; margin-bottom: 0pt; padding: 6pt 0pt 4pt 0pt;\"><span style=\"color: #2d2d2d; background-color: transparent; font-weight: bold; font-style: normal; font-variant: normal; text-decoration: none; vertical-align: baseline; white-space: pre-wrap;\">Compensation Structure</span></div>\n",
+      "posted": null,
+      "tags": [
+        "CRM",
+        "google sheets",
+        "financial services",
+        "Inside Sales"
+      ],
+      "is_remote": true,
+      "score": 6,
+      "reasons": [
+        "remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2090874",
+      "title": "🇩🇪Customer Support Manager",
+      "company": "Parkosecure GmbH",
+      "location": "Switzerland",
+      "salary_raw": "",
+      "description": "<p>🇩🇪 This job ad is written in German. 🇩🇪</p>\n<p>Die Parkosecure GmbH ist ein innovatives Unternehmen im Bereich Parkraummanagement in der Schweiz.</p>\n<p>Für die Betreuung unserer Kunden in der französischen Schweiz suchen wir eine zuverlässige und selbständig arbeitende Persönlichkeit im 100% Remote-Modell.</p>\n<p>Du arbeitest vollständig ortsunabhängig und bist die zentrale Ansprechperson für unsere französischsprachigen Kunden.</p>\n<div class=\"h2\">Vos missions</div>\n<ul style=\"\">\n<li style=\"\">\n<p>Bearbeitung von Kundenanfragen per Telefon und E-Mail</p>\n</li>\n<li style=\"\">Professionelle Behandlung von Kundenreaktionen und Einsprachen</li>\n</ul>\n<ul style=\"\">\n<li style=\"\">Unterstützung im administrativen Bereich</li>\n</ul>\n<ul style=\"\">\n<li style=\"\">Mitarbeit bei Projekten (bei vorhandenen Ressourcen)</li>\n</ul>\n<ul style=\"\">\n<li style=\"\">Sicherstellung einer hohen Kundenzufriedenheit</li>\n</ul>\n<div class=\"h2\">Vos compétences</div>\n<ul style=\"\">\n<li style=\"\">Französisch <strong>Muttersprache (zwingend)</strong></li>\n<li style=\"\">Sehr gute schriftliche und mündliche Ausdrucksweise</li>\n<li style=\"\">Deutsch und oder Englisch von Vorteil</li>\n<li style=\"\">Erfahrung im Kundendienst oder Administration</li>\n<li style=\"\">Sehr gute EDV Kenntnisse (MS Office zwingend)</li>\n<li style=\"\">Selbständige, strukturierte Arbeitsweise</li>\n<li style=\"\">Belastbar und lösungsorientiert</li>\n</ul>\n<div class=\"h2\">Avantages</div>\n<ul style=\"\">\n<li style=\"\">100% Remote Arbeit weltweit möglich</li>\n<li style=\"\">Flexible Arbeitsgestaltung</li>\n<li style=\"\">Dynamisches wachsendes Unternehmen</li>\n<li style=\"\">Möglichkeit zur Weiterentwicklung</li>\n<li style=\"\">Direkter Einfluss auf Prozesse und Kundenzufriedenheit</li>\n<li style=\"\">5 Wochen Ferien</li>\n<li style=\"\">Fixer, überdurchschnittlicher Lohn (kein Bonus, keine Provision)</li>\n</ul>\n<p>Wir bieten dir eine stabile und verantwortungsvolle Tätigkeit in einem wachsenden Unternehmen, in dem deine Arbeit geschätzt wird.</p>\n<p>Du arbe",
+      "posted": null,
+      "tags": [
+        "MS Office"
+      ],
+      "is_remote": true,
+      "score": 6,
+      "reasons": [
+        "remote + salary",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your remote + salary background. Apply if location/stack fits."
+    },
+    {
+      "source": "remotive",
+      "source_url": "https://remotive.com/jobs/2089995",
+      "title": "Head of Engineering",
+      "company": "Lemon.io",
+      "location": "USA timezones, European timezones",
+      "salary_raw": "",
+      "description": "<p style=\"margin: 0px 0px 8px; line-height: 1.7; color: rgb(51, 51, 51); \"><strong>About Lemon.io</strong></p><p style=\"margin: 0px 0px 8px; line-height: 1.7; color: rgb(51, 51, 51); \">Lemon.io is a profitable, growing talent marketplace that connects vetted senior engineers with companies that need them. We’ve been in business for 10 years, have 60 people across Ukraine, Europe, Canada, and the US, and process over $16M in annual GMV. We compress the traditional 2–5 week hiring timeline down to 24–48 hours through a curated, pre-vetted supply of developers.</p><p style=\"margin: 0px 0px 8px; line-height: 1.7; color: rgb(51, 51, 51); \">Hiring is still broken. Recruiters spend weeks building candidate pipelines on traditional platforms, burning energy on unqualified leads. We’re building the product that changes that. Giving recruiters qualified, vetted candidates within 24 hours without the grind. This is a pivotal moment: we’re transitioning from a services-driven marketplace to a technology-driven platform. We need an engineering leader who can drive that transformation.</p><p style=\"margin: 0px 0px 8px; line-height: 1.7; color: rgb(51, 51, 51); \"><strong>The Role</strong></p><p style=\"margin: 0px 0px 8px; line-height: 1.7; color: rgb(51, 51, 51); \">You will own engineering at Lemon.io. You’ll lead a growing team of engineers, make critical architecture and prioritization decisions, and be directly accountable for the speed and quality of what we ship. This is not a management-layer role. You’ll be hands-on, deeply involved in product decisions, and working side by side with the founder.</p><p style=\"margin: 0px 0px 8px; line-height: 1.7; color: rgb(51, 51, 51); \"><strong>What You’ll Do:</strong></p><ul style=\"\"><li style=\"\">Own the technical roadmap and make sure every engineering effort maps directly to business impact. No features for features’ sake.</li><li style=\"\">Lead and grow an engineering team that ships fast, iterates constantly, and treats complexity as",
+      "posted": null,
+      "tags": [
+        "AI/ML",
+        "startup",
+        "marketplace",
+        "fundraising"
+      ],
+      "is_remote": true,
+      "score": 6,
+      "reasons": [
+        "salary + ml",
+        "No LLM — rule-based score"
+      ],
+      "personal_note": "This role aligns with your salary + ml background. Apply if location/stack fits."
+    }
+  ]
+}
+</script>
+
+
+<script>
+try {
+  const raw = document.getElementById('daily-data')?.textContent;
+  window.__DATA__ = raw ? JSON.parse(raw) : { jobs: [] };
+  data = window.__DATA__;
+  console.log('jobhunter: loaded', data.jobs?.length ?? 0, 'roles');
+} catch(e) {
+  console.error('jobhunter embed error:', e);
+}
+refresh();
+</script>
+</body>
+</html>

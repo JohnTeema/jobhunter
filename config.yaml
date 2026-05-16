@@ -1,0 +1,33 @@
+roles:
+  - product-manager
+  - backend-engineer
+keywords_priority:
+  - python
+  - fastapi
+  - django
+  - product-led
+  - a/b testing
+  - data science
+  - ml
+  - api design
+  - postgresql
+  - saas
+locations:
+  - remote
+  - nigeria
+  - united-states
+salary_min_usd: 150000
+score_threshold: 5
+max_results: 20
+bio: >
+  Technical Product Manager and backend engineer with data science / ML skills.
+  Product strategy + hands-on Python/FastAPI backend + ML model ops.
+  Nigerian-based, fully remote or Nigeria/US timezone.
+  Agile delivery, API design, SQL, A/B testing, stakeholder comms.
+sources:
+  remoteok:  { enabled: true, pages: 1 }
+  remotive:  { enabled: true, pages: 1 }
+  wellfound: { enabled: true, pages: 1 }
+  wwr:      { enabled: true, pages: 1 }
+  duckduckgo: { enabled: true, pages: 1 }
+  naukri:   { enabled: true, pages: 1 }

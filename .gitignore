@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Generated output
+daily.json
+output/daily.json
+frontend/daily.json
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.p12
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
