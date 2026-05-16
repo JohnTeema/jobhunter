@@ -10,7 +10,10 @@ from jobhunter.scrapers.remotive import RemotiveScraper
 from jobhunter.scrapers.wellfound import WellfoundScraper
 from jobhunter.scrapers.wwr import WWRScraper
 from jobhunter.scrapers.duckduckgo import DuckDuckGoScraper
-from jobhunter.scrapers.naukri import NaukriScraper
+from jobhunter.scrapers.naukri     import NaukriScraper
+from jobhunter.scrapers.indeed     import IndeedScraper
+from jobhunter.scrapers.jobberman  import JobbermanScraper
+from jobhunter.scrapers.linkedin   import LinkedinScraper
 from jobhunter.scoring import build_shortlist
 
 OUT  = Path(__file__).parent.parent.parent / "output"
@@ -21,6 +24,9 @@ def _collect_jobs(cfg: Config) -> list[JobListing]:
     scrapers = [
         ("remoteok",    RemoteOKScraper),
         ("remotive",    RemotiveScraper),
+        ("indeed",      IndeedScraper),
+        ("jobberman",   JobbermanScraper),
+        ("linkedin",    LinkedinScraper),
         ("wellfound",   WellfoundScraper),
         ("wwr",         WWRScraper),
         ("duckduckgo",  DuckDuckGoScraper),
@@ -32,7 +38,7 @@ def _collect_jobs(cfg: Config) -> list[JobListing]:
             continue
         pages = src_cfg.get("pages", 1)
         try:
-            jobs += cls().fetch(pages)
+            jobs += cls(cfg.roles, cfg.locations).fetch(pages)
             print(f"  [{key}]  {len([j for j in jobs if j.source == key])} jobs collected")
         except Exception as exc:
             print(f"  [{key}]  FAILED: {exc}")
